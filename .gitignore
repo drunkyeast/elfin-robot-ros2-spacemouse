@@ -1,0 +1,12 @@
+# 忽略构建文件
+build/
+install/
+log/
+
+# 忽略已由的git仓库,避免嵌套
+src/elfin_robot_ros2
+
+# 忽略常见的文件
+*.swp
+.vscode
+
