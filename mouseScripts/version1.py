@@ -40,6 +40,11 @@ class SpaceMouseSimpleControl(Node):
         self.stop_timeout = 0.2     # 停止超时时间200ms
         self.is_moving = False      # 是否正在运动
         
+        # 参数缓存，避免重复调用相同参数的服务
+        self.last_command_data = None    # 上次发送的指令数据
+        self.command_repeat_count = 0    # 相同指令的重复次数
+        self.max_repeat_count = 3        # 最大允许重复次数（避免完全不发送）
+        
         # 创建定时器检查停止
         self.stop_timer = self.create_timer(0.1, self.check_stop_condition)
         
@@ -47,6 +52,7 @@ class SpaceMouseSimpleControl(Node):
         self.get_logger().info('死区阈值: {}'.format(self.deadzone))
         self.get_logger().info('调用间隔: {}秒'.format(self.min_interval))
         self.get_logger().info('停止超时: {}秒'.format(self.stop_timeout))
+        self.get_logger().info('最大重复指令次数: {}'.format(self.max_repeat_count))
 
     def twist_callback(self, msg):
         """处理SpaceMouse输入"""
@@ -84,8 +90,14 @@ class SpaceMouseSimpleControl(Node):
         command_data = self.map_to_command(max_axis, max_value)
         
         if command_data is not None:
-            self.send_teleop_command(command_data, max_axis, max_value)
-            self.last_call_time = current_time
+            # 检查是否与上次指令相同
+            if self.should_send_command(command_data):
+                self.send_teleop_command(command_data, max_axis, max_value)
+                self.last_call_time = current_time
+            else:
+                # 跳过重复指令，但仍更新时间记录
+                self.get_logger().debug(f'跳过重复指令: {command_data} (重复次数: {self.command_repeat_count})')
+            
             self.last_input_time = current_time  # 记录有效输入时间
             self.is_moving = True
 
@@ -106,6 +118,23 @@ class SpaceMouseSimpleControl(Node):
             return direction * mapping[axis_name]
         
         return None
+
+    def should_send_command(self, command_data):
+        """判断是否应该发送指令（避免重复发送相同参数）"""
+        if self.last_command_data is None or self.last_command_data != command_data:
+            # 新指令或不同指令，重置计数器
+            self.last_command_data = command_data
+            self.command_repeat_count = 1
+            return True
+        else:
+            # 相同指令
+            self.command_repeat_count += 1
+            # 允许少量重复以确保指令到达，但避免过度频繁
+            if self.command_repeat_count <= self.max_repeat_count:
+                return True
+            else:
+                # 超过最大重复次数，跳过发送
+                return False
 
     def send_teleop_command(self, command_data, axis_name, value):
         """发送遥操作指令"""
@@ -143,6 +172,9 @@ class SpaceMouseSimpleControl(Node):
         if self.is_moving and (current_time - self.last_input_time) > self.stop_timeout:
             self.stop_robot()
             self.is_moving = False
+            # 重置指令缓存
+            self.last_command_data = None
+            self.command_repeat_count = 0
 
     def stop_robot(self):
         """停止机械臂运动"""
